@@ -1,4 +1,29 @@
-.fbx filter=lfs diff=lfs merge=lfs -text
-.wav filter=lfs diff=lfs merge=lfs -text
-.mp4 filter=lfs diff=lfs merge=lfs -text
-.psd filter=lfs diff=lfs merge=lfs -text
+# Keep repository text files normalized with LF across platforms.
+* text=auto eol=lf
+
+# Unity scene/prefab/meta assets are YAML text and should be diffable.
+*.meta text eol=lf
+*.unity text eol=lf
+*.prefab text eol=lf
+*.asset text eol=lf
+*.mat text eol=lf
+*.anim text eol=lf
+*.controller text eol=lf
+*.overrideController text eol=lf
+*.mask text eol=lf
+*.playable text eol=lf
+*.physicsMaterial2D text eol=lf
+*.physicsMaterial text eol=lf
+*.terrainlayer text eol=lf
+
+# Preserve native line endings for scripts intended for shell/batch execution.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.sh text eol=lf
+
+# Large binary assets tracked via Git LFS.
+*.fbx filter=lfs diff=lfs merge=lfs -text
+*.wav filter=lfs diff=lfs merge=lfs -text
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.psd filter=lfs diff=lfs merge=lfs -text

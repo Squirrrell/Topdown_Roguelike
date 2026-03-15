@@ -12,6 +12,7 @@
 # Visual Studio / Rider / VS Code
 .vs/
 .vscode/
+.idea/
 *.csproj
 *.sln
 *.suo
@@ -27,6 +28,9 @@
 
 # OS files
 .DS_Store
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
 
 # Crash reports
