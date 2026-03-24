@@ -5,13 +5,47 @@ public class PlayerMovement : MonoBehaviour
 {
     public float speed = 6f;
     public bool spawnAtScreenCenter = true;
+    public string playerSortingLayerName = "Default";
+    public int playerSortingOrder = 20;
+
+    [Header("Dash")]
+    public float dashSpeed = 18f;
+    public float dashDuration = 0.18f;
+    public float dashCooldown = 3f;
+
+    [Header("Shooting")]
+    public float shootInterval = 0.7f;
+    public float bulletSpeed = 11f;
+    public float bulletLifetime = 3f;
+    public int bulletDamage = 1;
+    public string bulletSortingLayerName = "Default";
+    public int bulletSortingOrder = 14;
 
     private Rigidbody2D rb;
+    private SpriteRenderer sr;
+    private PlayerHealth playerHealth;
     private Vector2 movement;
+    private Vector2 lastMoveDirection = Vector2.right;
+    private float nextShootTime = 0f;
+    private static Sprite bulletSprite;
+    private bool isDashing = false;
+    private Vector2 dashDirection = Vector2.right;
+    private float dashEndTime = 0f;
+    private float nextDashTime = 0f;
 
     void Start()
     {
         rb = GetComponent<Rigidbody2D>();
+        sr = GetComponent<SpriteRenderer>();
+        playerHealth = GetComponent<PlayerHealth>();
+
+        if (sr != null)
+        {
+            if (!string.IsNullOrWhiteSpace(playerSortingLayerName))
+                sr.sortingLayerName = playerSortingLayerName;
+
+            sr.sortingOrder = playerSortingOrder;
+        }
 
         if (spawnAtScreenCenter)
             MoveToScreenCenter();
@@ -50,12 +84,28 @@ public class PlayerMovement : MonoBehaviour
         }
 
         movement = movement.normalized;
+
+        if (movement.sqrMagnitude > 0.001f)
+            lastMoveDirection = movement;
+
+        HandleDashInput();
+
+        if (isDashing && Time.time >= dashEndTime)
+            EndDash();
+
+        TryShootAtCursor();
     }
 
     void FixedUpdate()
     {
         if (rb == null)
             return;
+
+        if (isDashing)
+        {
+            rb.linearVelocity = dashDirection * dashSpeed;
+            return;
+        }
 
         rb.linearVelocity = movement * speed;
     }
@@ -79,5 +129,107 @@ public class PlayerMovement : MonoBehaviour
             rb.position = targetPosition;
         else
             transform.position = targetPosition;
+    }
+
+    void TryShootAtCursor()
+    {
+        if (Time.time < nextShootTime)
+            return;
+
+        if (Mouse.current == null)
+            return;
+
+        Camera mainCamera = Camera.main;
+        if (mainCamera == null)
+            return;
+
+        Vector2 mouseScreenPosition = Mouse.current.position.ReadValue();
+        Vector3 targetWorld3 = mainCamera.ScreenToWorldPoint(new Vector3(mouseScreenPosition.x, mouseScreenPosition.y, Mathf.Abs(mainCamera.transform.position.z)));
+        Vector2 targetWorld = new Vector2(targetWorld3.x, targetWorld3.y);
+        Vector2 origin = rb != null ? rb.position : (Vector2)transform.position;
+        Vector2 direction = targetWorld - origin;
+
+        if (direction.sqrMagnitude < 0.0001f)
+            return;
+
+        SpawnBullet(origin, direction.normalized);
+        nextShootTime = Time.time + shootInterval;
+    }
+
+    void SpawnBullet(Vector2 origin, Vector2 direction)
+    {
+        GameObject bulletObject = new GameObject("Player Bullet", typeof(SpriteRenderer), typeof(CircleCollider2D), typeof(Rigidbody2D), typeof(PlayerBullet));
+        bulletObject.transform.position = origin;
+
+        SpriteRenderer bulletRenderer = bulletObject.GetComponent<SpriteRenderer>();
+        bulletRenderer.sprite = GetBulletSprite();
+        bulletRenderer.color = new Color(0.22f, 1f, 0.18f, 1f);
+        if (!string.IsNullOrWhiteSpace(bulletSortingLayerName))
+            bulletRenderer.sortingLayerName = bulletSortingLayerName;
+
+        bulletRenderer.sortingOrder = bulletSortingOrder;
+
+        CircleCollider2D bulletCollider = bulletObject.GetComponent<CircleCollider2D>();
+        bulletCollider.isTrigger = true;
+        bulletCollider.radius = 0.14f;
+
+        Rigidbody2D bulletRb = bulletObject.GetComponent<Rigidbody2D>();
+        bulletRb.bodyType = RigidbodyType2D.Kinematic;
+        bulletRb.gravityScale = 0f;
+
+        PlayerBullet bullet = bulletObject.GetComponent<PlayerBullet>();
+        bullet.Initialize(direction, bulletSpeed, bulletDamage, bulletLifetime, gameObject);
+    }
+
+    Sprite GetBulletSprite()
+    {
+        if (bulletSprite != null)
+            return bulletSprite;
+
+        const int size = 32;
+        Texture2D texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        texture.filterMode = FilterMode.Point;
+
+        float radius = (size - 1) * 0.5f;
+        Vector2 center = new Vector2(radius, radius);
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float dist = Vector2.Distance(new Vector2(x, y), center);
+                texture.SetPixel(x, y, dist <= radius ? Color.white : Color.clear);
+            }
+        }
+
+        texture.Apply();
+        bulletSprite = Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), 64f);
+        return bulletSprite;
+    }
+
+    void HandleDashInput()
+    {
+        if (Keyboard.current == null)
+            return;
+
+        bool pressedDash = Keyboard.current.leftShiftKey.wasPressedThisFrame || Keyboard.current.rightShiftKey.wasPressedThisFrame;
+        if (!pressedDash || isDashing || Time.time < nextDashTime)
+            return;
+
+        dashDirection = lastMoveDirection.sqrMagnitude > 0.001f ? lastMoveDirection.normalized : Vector2.right;
+        isDashing = true;
+        dashEndTime = Time.time + dashDuration;
+        nextDashTime = Time.time + dashCooldown;
+
+        if (playerHealth != null)
+            playerHealth.SetExternalInvincibility(true);
+    }
+
+    void EndDash()
+    {
+        isDashing = false;
+
+        if (playerHealth != null)
+            playerHealth.SetExternalInvincibility(false);
     }
 }
