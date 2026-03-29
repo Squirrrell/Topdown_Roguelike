@@ -16,7 +16,8 @@ public class PlayerHealth : MonoBehaviour
         PlusOneHealth,
         PlusOneDamage,
         PlusOnePierce,
-        PlusOneRicochet
+        PlusOneRicochet,
+        PlusOneBullet
     }
 
     public int maxHealth = 5;
@@ -206,7 +207,8 @@ public class PlayerHealth : MonoBehaviour
             UpgradeType.PlusOneHealth,
             UpgradeType.PlusOneDamage,
             UpgradeType.PlusOnePierce,
-            UpgradeType.PlusOneRicochet
+            UpgradeType.PlusOneRicochet,
+            UpgradeType.PlusOneBullet
         };
 
         int picks = Mathf.Clamp(count, 1, all.Count);
@@ -307,6 +309,8 @@ public class PlayerHealth : MonoBehaviour
                 return "+1 Pierce";
             case UpgradeType.PlusOneRicochet:
                 return "+1 Ricochet";
+            case UpgradeType.PlusOneBullet:
+                return "+1 Bullet";
             default:
                 return "Upgrade";
         }
@@ -324,6 +328,8 @@ public class PlayerHealth : MonoBehaviour
                 return "Player bullets pass through 1 extra enemy.";
             case UpgradeType.PlusOneRicochet:
                 return "Player bullets gain 1 extra bounce off walls or enemies.";
+            case UpgradeType.PlusOneBullet:
+                return "Player shoots 1 extra bullet per attack.";
             default:
                 return string.Empty;
         }
@@ -353,6 +359,11 @@ public class PlayerHealth : MonoBehaviour
             case UpgradeType.PlusOneRicochet:
                 if (movementControllerCached != null)
                     movementControllerCached.AddBulletRicochet(1);
+                break;
+
+            case UpgradeType.PlusOneBullet:
+                if (movementControllerCached != null)
+                    movementControllerCached.AddBulletsPerShot(1);
                 break;
         }
 

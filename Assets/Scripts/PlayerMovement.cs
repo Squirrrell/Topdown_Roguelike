@@ -21,6 +21,8 @@ public class PlayerMovement : MonoBehaviour
     public int bulletDamage = 1;
     public int bulletPierce = 0;
     public int bulletRicochet = 0;
+    public int bulletsPerShot = 1;
+    public float multiShotSpreadAngle = 12f;
     public string bulletSortingLayerName = "Default";
     public int bulletSortingOrder = 14;
 
@@ -159,8 +161,28 @@ public class PlayerMovement : MonoBehaviour
         if (direction.sqrMagnitude < 0.0001f)
             return;
 
-        SpawnBullet(origin, direction.normalized);
+        SpawnBullets(origin, direction.normalized);
         nextShootTime = Time.time + shootInterval;
+    }
+
+    void SpawnBullets(Vector2 origin, Vector2 baseDirection)
+    {
+        int shotCount = Mathf.Max(1, bulletsPerShot);
+        if (shotCount == 1)
+        {
+            SpawnBullet(origin, baseDirection);
+            return;
+        }
+
+        float clampedSpread = Mathf.Clamp(multiShotSpreadAngle, 0f, 90f);
+        float centerOffset = (shotCount - 1) * 0.5f;
+        for (int i = 0; i < shotCount; i++)
+        {
+            float offsetIndex = i - centerOffset;
+            float angle = offsetIndex * clampedSpread;
+            Vector2 direction = Quaternion.Euler(0f, 0f, angle) * baseDirection;
+            SpawnBullet(origin, direction.normalized);
+        }
     }
 
     void SpawnBullet(Vector2 origin, Vector2 direction)
@@ -195,6 +217,14 @@ public class PlayerMovement : MonoBehaviour
             return;
 
         bulletRicochet += amount;
+    }
+
+    public void AddBulletsPerShot(int amount)
+    {
+        if (amount <= 0)
+            return;
+
+        bulletsPerShot += amount;
     }
 
     PlayerBullet GetPlayerBulletFromPool()
