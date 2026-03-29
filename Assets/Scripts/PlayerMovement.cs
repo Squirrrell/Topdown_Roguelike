@@ -19,6 +19,8 @@ public class PlayerMovement : MonoBehaviour
     public float bulletSpeed = 11f;
     public float bulletLifetime = 3f;
     public int bulletDamage = 1;
+    public int bulletPierce = 0;
+    public int bulletRicochet = 0;
     public string bulletSortingLayerName = "Default";
     public int bulletSortingOrder = 14;
 
@@ -168,7 +170,31 @@ public class PlayerMovement : MonoBehaviour
         bulletObject.hideFlags = HideFlags.None;
         bulletObject.SetActive(true);
         bulletObject.transform.position = origin;
-        bullet.Initialize(direction, bulletSpeed, bulletDamage, bulletLifetime, gameObject, ReturnPlayerBulletToPool);
+        bullet.Initialize(direction, bulletSpeed, bulletDamage, bulletLifetime, bulletPierce, bulletRicochet, gameObject, ReturnPlayerBulletToPool);
+    }
+
+    public void AddBulletDamage(int amount)
+    {
+        if (amount <= 0)
+            return;
+
+        bulletDamage += amount;
+    }
+
+    public void AddBulletPierce(int amount)
+    {
+        if (amount <= 0)
+            return;
+
+        bulletPierce += amount;
+    }
+
+    public void AddBulletRicochet(int amount)
+    {
+        if (amount <= 0)
+            return;
+
+        bulletRicochet += amount;
     }
 
     PlayerBullet GetPlayerBulletFromPool()
