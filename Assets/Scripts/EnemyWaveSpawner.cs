@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections;
 using UnityEngine.InputSystem;
+using UnityEngine.Serialization;
 
 public class EnemyWaveSpawner : MonoBehaviour
 {
@@ -18,6 +19,7 @@ public class EnemyWaveSpawner : MonoBehaviour
 
     [Header("Debug")]
     public bool debugMode = false;
+    [FormerlySerializedAs("showDebugOveorlay")]
     public bool showDebugOverlay = true;
     public bool outputDebugToConsole = true;
     public float debugLogInterval = 1f;
@@ -33,6 +35,8 @@ public class EnemyWaveSpawner : MonoBehaviour
     [Header("Spawn Source")]
     public EnemyChase[] enemyPrefabs;
     public EnemyChase fallbackEnemyPrefab;
+    public bool autoUseSceneEnemyAsFallback = true;
+    public bool autoCreateRuntimeFallbackEnemy = true;
     public bool randomizeTypeWhenUsingFallback = true;
 
     [Header("Spawn Area")]
@@ -50,6 +54,8 @@ public class EnemyWaveSpawner : MonoBehaviour
     private int currentWave = 0;
     private bool waitingForNextWave = false;
     private bool wavesActivated = false;
+    private bool hasLoggedMissingSpawnSourceWarning = false;
+    private EnemyChase runtimeFallbackEnemyPrefab;
     private SpawnerState state = SpawnerState.WaitingForActivation;
     private float nextDebugLogTime = 0f;
 
@@ -89,6 +95,14 @@ public class EnemyWaveSpawner : MonoBehaviour
     {
         if (wavesActivated)
             return;
+
+        if (!HasAnySpawnSourceConfigured())
+        {
+            StopWavesDueToMissingSpawnSource();
+            return;
+        }
+
+        hasLoggedMissingSpawnSourceWarning = false;
 
         wavesActivated = true;
         waitingForNextWave = true;
@@ -133,9 +147,7 @@ public class EnemyWaveSpawner : MonoBehaviour
             EnemyChase prefabToSpawn = PickEnemyPrefab();
             if (prefabToSpawn == null)
             {
-                Debug.LogWarning("EnemyWaveSpawner: Assign enemyPrefabs or fallbackEnemyPrefab in Inspector.");
-                waitingForNextWave = false;
-                SetState(SpawnerState.WaitingForActivation);
+                StopWavesDueToMissingSpawnSource();
                 yield break;
             }
 
@@ -147,6 +159,8 @@ public class EnemyWaveSpawner : MonoBehaviour
                 Destroy(summonCircle);
 
             EnemyChase enemy = Instantiate(prefabToSpawn, spawnPosition, Quaternion.identity);
+            if (!enemy.gameObject.activeSelf)
+                enemy.gameObject.SetActive(true);
 
             if (randomizeTypeWhenUsingFallback && fallbackEnemyPrefab != null && prefabToSpawn == fallbackEnemyPrefab)
             {
@@ -241,11 +255,119 @@ public class EnemyWaveSpawner : MonoBehaviour
     {
         if (enemyPrefabs != null && enemyPrefabs.Length > 0)
         {
-            int index = Random.Range(0, enemyPrefabs.Length);
-            return enemyPrefabs[index];
+            int validCount = 0;
+            for (int i = 0; i < enemyPrefabs.Length; i++)
+            {
+                if (enemyPrefabs[i] != null)
+                    validCount++;
+            }
+
+            if (validCount > 0)
+            {
+                int targetValidIndex = Random.Range(0, validCount);
+                for (int i = 0; i < enemyPrefabs.Length; i++)
+                {
+                    if (enemyPrefabs[i] == null)
+                        continue;
+
+                    if (targetValidIndex == 0)
+                        return enemyPrefabs[i];
+
+                    targetValidIndex--;
+                }
+            }
         }
 
         return fallbackEnemyPrefab;
+    }
+
+    bool HasAnySpawnSourceConfigured()
+    {
+        TryAutoAssignFallbackFromScene();
+        TryCreateRuntimeFallbackEnemy();
+
+        if (fallbackEnemyPrefab != null)
+            return true;
+
+        if (enemyPrefabs == null || enemyPrefabs.Length == 0)
+            return false;
+
+        for (int i = 0; i < enemyPrefabs.Length; i++)
+        {
+            if (enemyPrefabs[i] != null)
+                return true;
+        }
+
+        return false;
+    }
+
+    void TryAutoAssignFallbackFromScene()
+    {
+        if (!autoUseSceneEnemyAsFallback || fallbackEnemyPrefab != null)
+            return;
+
+        EnemyChase[] liveEnemies = FindObjectsByType<EnemyChase>(FindObjectsSortMode.None);
+        if (liveEnemies.Length == 0)
+            return;
+
+        fallbackEnemyPrefab = liveEnemies[0];
+        Debug.LogWarning("EnemyWaveSpawner: No spawn prefab assigned; using an existing EnemyChase from the scene as fallback template.", this);
+    }
+
+    void TryCreateRuntimeFallbackEnemy()
+    {
+        if (!autoCreateRuntimeFallbackEnemy || fallbackEnemyPrefab != null)
+            return;
+
+        if (runtimeFallbackEnemyPrefab != null)
+        {
+            fallbackEnemyPrefab = runtimeFallbackEnemyPrefab;
+            return;
+        }
+
+        GameObject runtimeTemplate = new GameObject(
+            "Runtime Enemy Fallback Template",
+            typeof(SpriteRenderer),
+            typeof(Rigidbody2D),
+            typeof(CircleCollider2D),
+            typeof(EnemyChase));
+
+        runtimeTemplate.hideFlags = HideFlags.HideInHierarchy;
+        runtimeTemplate.SetActive(false);
+
+        Rigidbody2D rb = runtimeTemplate.GetComponent<Rigidbody2D>();
+        rb.bodyType = RigidbodyType2D.Kinematic;
+        rb.gravityScale = 0f;
+        rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+
+        CircleCollider2D circleCollider = runtimeTemplate.GetComponent<CircleCollider2D>();
+        circleCollider.isTrigger = true;
+        circleCollider.radius = 0.28f;
+
+        runtimeFallbackEnemyPrefab = runtimeTemplate.GetComponent<EnemyChase>();
+        fallbackEnemyPrefab = runtimeFallbackEnemyPrefab;
+
+        Debug.LogWarning("EnemyWaveSpawner: No spawn prefab assigned; generated a runtime fallback EnemyChase template.", this);
+    }
+
+    void StopWavesDueToMissingSpawnSource()
+    {
+        if (!hasLoggedMissingSpawnSourceWarning)
+        {
+            Debug.LogWarning("EnemyWaveSpawner: Assign at least one valid EnemyChase prefab in enemyPrefabs or fallbackEnemyPrefab in the Inspector.", this);
+            hasLoggedMissingSpawnSourceWarning = true;
+        }
+
+        wavesActivated = false;
+        waitingForNextWave = false;
+        CancelInvoke(nameof(SpawnNextWave));
+        SetState(SpawnerState.WaitingForActivation);
+    }
+
+    void OnDestroy()
+    {
+        if (runtimeFallbackEnemyPrefab != null)
+            Destroy(runtimeFallbackEnemyPrefab.gameObject);
     }
 
     Vector3 GetRandomSpawnPosition()
