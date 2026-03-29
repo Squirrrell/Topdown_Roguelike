@@ -42,6 +42,14 @@ public class EnemyWaveSpawner : MonoBehaviour
     [Header("Spawn Area")]
     public Transform areaCenter;
     public Vector2 areaSize = new Vector2(16f, 9f);
+    public int maxSpawnValidationAttempts = 12;
+    public bool useWallDefinedPlayableArea = true;
+    public string leftWallName = "LeftWall";
+    public string rightWallName = "RightWall";
+    public string topWallName = "TopWall";
+    public string bottomWallName = "BottomWall";
+    public bool constrainSpawnsToCameraView = true;
+    public float spawnEdgePadding = 0.3f;
 
     [Header("Summoning")]
     public float summonDelay = 0.45f;
@@ -58,6 +66,10 @@ public class EnemyWaveSpawner : MonoBehaviour
     private EnemyChase runtimeFallbackEnemyPrefab;
     private SpawnerState state = SpawnerState.WaitingForActivation;
     private float nextDebugLogTime = 0f;
+    private GameObject cachedLeftWall;
+    private GameObject cachedRightWall;
+    private GameObject cachedTopWall;
+    private GameObject cachedBottomWall;
 
     private static Sprite summonCircleSprite;
 
@@ -83,7 +95,7 @@ public class EnemyWaveSpawner : MonoBehaviour
         if (waitingForNextWave)
             return;
 
-        if (FindObjectsByType<EnemyChase>(FindObjectsSortMode.None).Length == 0)
+        if (EnemyChase.ActiveEnemyCount == 0)
         {
             waitingForNextWave = true;
             SetState(SpawnerState.WaitingForWaveDelay);
@@ -142,34 +154,48 @@ public class EnemyWaveSpawner : MonoBehaviour
 
     IEnumerator SpawnWaveRoutine(int count)
     {
+        EnemyChase[] prefabsToSpawn = new EnemyChase[count];
+        Vector3[] spawnPositions = new Vector3[count];
+        GameObject[] summonCircles = new GameObject[count];
+
         for (int i = 0; i < count; i++)
         {
             EnemyChase prefabToSpawn = PickEnemyPrefab();
             if (prefabToSpawn == null)
             {
+                for (int j = 0; j < i; j++)
+                {
+                    if (summonCircles[j] != null)
+                        Destroy(summonCircles[j]);
+                }
+
                 StopWavesDueToMissingSpawnSource();
                 yield break;
             }
 
             Vector3 spawnPosition = GetRandomSpawnPosition();
-            GameObject summonCircle = CreateSummoningCircle(spawnPosition);
+            prefabsToSpawn[i] = prefabToSpawn;
+            spawnPositions[i] = spawnPosition;
+            summonCircles[i] = CreateSummoningCircle(spawnPosition);
+        }
+
+        if (summonDelay > 0f)
             yield return new WaitForSeconds(summonDelay);
 
-            if (summonCircle != null)
-                Destroy(summonCircle);
+        for (int i = 0; i < count; i++)
+        {
+            if (summonCircles[i] != null)
+                Destroy(summonCircles[i]);
 
-            EnemyChase enemy = Instantiate(prefabToSpawn, spawnPosition, Quaternion.identity);
+            Vector3 validatedSpawnPosition = GetValidatedSpawnPosition(spawnPositions[i]);
+            EnemyChase enemy = Instantiate(prefabsToSpawn[i], validatedSpawnPosition, Quaternion.identity);
             if (!enemy.gameObject.activeSelf)
                 enemy.gameObject.SetActive(true);
 
-            if (randomizeTypeWhenUsingFallback && fallbackEnemyPrefab != null && prefabToSpawn == fallbackEnemyPrefab)
+            if (randomizeTypeWhenUsingFallback && fallbackEnemyPrefab != null && prefabsToSpawn[i] == fallbackEnemyPrefab)
             {
-                enemy.enemyType = (EnemyChase.EnemyType)Random.Range(0, 3);
-                enemy.applyTypeDefaultsOnStart = true;
+                enemy.ConfigureEnemyType((EnemyChase.EnemyType)Random.Range(0, 3), true);
             }
-
-            if (spawnSpacingWithinWave > 0f)
-                yield return new WaitForSeconds(spawnSpacingWithinWave);
         }
 
         waitingForNextWave = false;
@@ -231,7 +257,7 @@ public class EnemyWaveSpawner : MonoBehaviour
             " | wavesActivated=" + wavesActivated +
             " | waitingForNextWave=" + waitingForNextWave +
             " | currentWave=" + currentWave +
-            " | liveEnemies=" + FindObjectsByType<EnemyChase>(FindObjectsSortMode.None).Length);
+            " | liveEnemies=" + EnemyChase.ActiveEnemyCount);
     }
 
     void OnGUI()
@@ -247,7 +273,7 @@ public class EnemyWaveSpawner : MonoBehaviour
         GUILayout.Label("Waves Activated: " + wavesActivated);
         GUILayout.Label("Waiting For Next Wave: " + waitingForNextWave);
         GUILayout.Label("Current Wave: " + currentWave);
-        GUILayout.Label("Live Enemies: " + FindObjectsByType<EnemyChase>(FindObjectsSortMode.None).Length);
+        GUILayout.Label("Live Enemies: " + EnemyChase.ActiveEnemyCount);
         GUILayout.EndArea();
     }
 
@@ -306,11 +332,11 @@ public class EnemyWaveSpawner : MonoBehaviour
         if (!autoUseSceneEnemyAsFallback || fallbackEnemyPrefab != null)
             return;
 
-        EnemyChase[] liveEnemies = FindObjectsByType<EnemyChase>(FindObjectsSortMode.None);
-        if (liveEnemies.Length == 0)
+        EnemyChase liveEnemy = FindFirstObjectByType<EnemyChase>();
+        if (liveEnemy == null)
             return;
 
-        fallbackEnemyPrefab = liveEnemies[0];
+        fallbackEnemyPrefab = liveEnemy;
         Debug.LogWarning("EnemyWaveSpawner: No spawn prefab assigned; using an existing EnemyChase from the scene as fallback template.", this);
     }
 
@@ -336,12 +362,12 @@ public class EnemyWaveSpawner : MonoBehaviour
         runtimeTemplate.SetActive(false);
 
         Rigidbody2D rb = runtimeTemplate.GetComponent<Rigidbody2D>();
-        rb.bodyType = RigidbodyType2D.Kinematic;
+        rb.bodyType = RigidbodyType2D.Dynamic;
         rb.gravityScale = 0f;
         rb.constraints = RigidbodyConstraints2D.FreezeRotation;
 
         CircleCollider2D circleCollider = runtimeTemplate.GetComponent<CircleCollider2D>();
-        circleCollider.isTrigger = true;
+        circleCollider.isTrigger = false;
         circleCollider.radius = 0.28f;
 
         runtimeFallbackEnemyPrefab = runtimeTemplate.GetComponent<EnemyChase>();
@@ -373,13 +399,185 @@ public class EnemyWaveSpawner : MonoBehaviour
     Vector3 GetRandomSpawnPosition()
     {
         Vector3 center = areaCenter != null ? areaCenter.position : transform.position;
-        float halfX = areaSize.x * 0.5f;
-        float halfY = areaSize.y * 0.5f;
+        Bounds spawnBounds = GetAllowedSpawnBounds();
+        int attempts = Mathf.Max(1, maxSpawnValidationAttempts);
 
-        float x = Random.Range(center.x - halfX, center.x + halfX);
-        float y = Random.Range(center.y - halfY, center.y + halfY);
+        for (int i = 0; i < attempts; i++)
+        {
+            float x = Random.Range(spawnBounds.min.x, spawnBounds.max.x);
+            float y = Random.Range(spawnBounds.min.y, spawnBounds.max.y);
+            Vector3 candidate = new Vector3(x, y, 0f);
 
+            if (IsPositionInsideSpawnBox(candidate))
+                return candidate;
+        }
+
+        Vector3 fallback = new Vector3(center.x, center.y, 0f);
+        Vector3 clamped = ClampPositionToSpawnBox(fallback);
+
+        if (!IsPositionInsideSpawnBox(clamped))
+            Debug.LogError("EnemyWaveSpawner: Spawn validation failed. Clamped fallback is still outside spawn box.", this);
+
+        return clamped;
+    }
+
+    Bounds GetSpawnBounds()
+    {
+        Vector3 center = areaCenter != null ? areaCenter.position : transform.position;
+        Vector3 size = new Vector3(Mathf.Max(0.01f, areaSize.x), Mathf.Max(0.01f, areaSize.y), 0.01f);
+        return new Bounds(new Vector3(center.x, center.y, 0f), size);
+    }
+
+    bool IsPositionInsideSpawnBox(Vector3 position)
+    {
+        Bounds spawnBounds = GetAllowedSpawnBounds();
+        return
+            position.x >= spawnBounds.min.x && position.x <= spawnBounds.max.x &&
+            position.y >= spawnBounds.min.y && position.y <= spawnBounds.max.y;
+    }
+
+    Vector3 ClampPositionToSpawnBox(Vector3 position)
+    {
+        Bounds spawnBounds = GetAllowedSpawnBounds();
+        float x = Mathf.Clamp(position.x, spawnBounds.min.x, spawnBounds.max.x);
+        float y = Mathf.Clamp(position.y, spawnBounds.min.y, spawnBounds.max.y);
         return new Vector3(x, y, 0f);
+    }
+
+    Vector3 GetValidatedSpawnPosition(Vector3 position)
+    {
+        if (IsPositionInsideSpawnBox(position))
+            return position;
+
+        Vector3 clamped = ClampPositionToSpawnBox(position);
+        if (!IsPositionInsideSpawnBox(clamped))
+            Debug.LogError("EnemyWaveSpawner: Failed to clamp spawn into playable bounds.", this);
+
+        return clamped;
+    }
+
+    Bounds GetAllowedSpawnBounds()
+    {
+        Bounds allowed = GetSpawnBounds();
+
+        if (useWallDefinedPlayableArea && TryGetWallDefinedPlayableBounds(out Bounds wallBounds))
+        {
+            float wallMinX = wallBounds.min.x + spawnEdgePadding;
+            float wallMaxX = wallBounds.max.x - spawnEdgePadding;
+            float wallMinY = wallBounds.min.y + spawnEdgePadding;
+            float wallMaxY = wallBounds.max.y - spawnEdgePadding;
+
+            float wallClampedMinX = Mathf.Max(allowed.min.x, wallMinX);
+            float wallClampedMaxX = Mathf.Min(allowed.max.x, wallMaxX);
+            float wallClampedMinY = Mathf.Max(allowed.min.y, wallMinY);
+            float wallClampedMaxY = Mathf.Min(allowed.max.y, wallMaxY);
+
+            if (wallClampedMinX <= wallClampedMaxX && wallClampedMinY <= wallClampedMaxY)
+            {
+                Vector3 wallCenter = new Vector3((wallClampedMinX + wallClampedMaxX) * 0.5f, (wallClampedMinY + wallClampedMaxY) * 0.5f, 0f);
+                Vector3 wallSize = new Vector3(Mathf.Max(0.01f, wallClampedMaxX - wallClampedMinX), Mathf.Max(0.01f, wallClampedMaxY - wallClampedMinY), 0.01f);
+                return new Bounds(wallCenter, wallSize);
+            }
+
+            Debug.LogWarning("EnemyWaveSpawner: Wall-defined playable bounds do not overlap spawn area; falling back to other bounds checks.", this);
+        }
+
+        if (!constrainSpawnsToCameraView)
+            return allowed;
+
+        if (!TryGetCameraBounds(out Bounds cameraBounds))
+            return allowed;
+
+        float minX = Mathf.Max(allowed.min.x, cameraBounds.min.x + spawnEdgePadding);
+        float maxX = Mathf.Min(allowed.max.x, cameraBounds.max.x - spawnEdgePadding);
+        float minY = Mathf.Max(allowed.min.y, cameraBounds.min.y + spawnEdgePadding);
+        float maxY = Mathf.Min(allowed.max.y, cameraBounds.max.y - spawnEdgePadding);
+
+        if (minX > maxX || minY > maxY)
+        {
+            Debug.LogWarning("EnemyWaveSpawner: Spawn area does not overlap camera bounds; falling back to spawn area only.", this);
+            return allowed;
+        }
+
+        Vector3 center = new Vector3((minX + maxX) * 0.5f, (minY + maxY) * 0.5f, 0f);
+        Vector3 size = new Vector3(Mathf.Max(0.01f, maxX - minX), Mathf.Max(0.01f, maxY - minY), 0.01f);
+        return new Bounds(center, size);
+    }
+
+    bool TryGetCameraBounds(out Bounds cameraBounds)
+    {
+        cameraBounds = default;
+        Camera cam = Camera.main;
+        if (cam == null || !cam.orthographic)
+            return false;
+
+        Vector3 camPos = cam.transform.position;
+        float halfHeight = cam.orthographicSize;
+        float halfWidth = halfHeight * cam.aspect;
+
+        cameraBounds = new Bounds(
+            new Vector3(camPos.x, camPos.y, 0f),
+            new Vector3(halfWidth * 2f, halfHeight * 2f, 0.01f));
+
+        return true;
+    }
+
+    public bool TryGetPlayableBounds(out Bounds bounds)
+    {
+        if (useWallDefinedPlayableArea && TryGetWallDefinedPlayableBounds(out bounds))
+            return true;
+
+        bounds = GetAllowedSpawnBounds();
+        return true;
+    }
+
+    bool TryGetWallDefinedPlayableBounds(out Bounds bounds)
+    {
+        bounds = default;
+
+        GameObject leftWall = GetCachedWall(ref cachedLeftWall, leftWallName);
+        GameObject rightWall = GetCachedWall(ref cachedRightWall, rightWallName);
+        GameObject topWall = GetCachedWall(ref cachedTopWall, topWallName);
+        GameObject bottomWall = GetCachedWall(ref cachedBottomWall, bottomWallName);
+
+        if (leftWall == null || rightWall == null || topWall == null || bottomWall == null)
+            return false;
+
+        float leftInner = GetWallInnerCoordinate(leftWall, true, true);
+        float rightInner = GetWallInnerCoordinate(rightWall, true, false);
+        float topInner = GetWallInnerCoordinate(topWall, false, false);
+        float bottomInner = GetWallInnerCoordinate(bottomWall, false, true);
+
+        if (leftInner >= rightInner || bottomInner >= topInner)
+            return false;
+
+        Vector3 center = new Vector3((leftInner + rightInner) * 0.5f, (bottomInner + topInner) * 0.5f, 0f);
+        Vector3 size = new Vector3(rightInner - leftInner, topInner - bottomInner, 0.01f);
+        bounds = new Bounds(center, size);
+        return true;
+    }
+
+    GameObject GetCachedWall(ref GameObject cachedWall, string wallName)
+    {
+        if (cachedWall != null && cachedWall.name == wallName)
+            return cachedWall;
+
+        cachedWall = GameObject.Find(wallName);
+        return cachedWall;
+    }
+
+    float GetWallInnerCoordinate(GameObject wall, bool xAxis, bool useMax)
+    {
+        Collider2D wallCollider = wall.GetComponent<Collider2D>();
+        if (wallCollider != null)
+        {
+            if (xAxis)
+                return useMax ? wallCollider.bounds.max.x : wallCollider.bounds.min.x;
+
+            return useMax ? wallCollider.bounds.max.y : wallCollider.bounds.min.y;
+        }
+
+        return xAxis ? wall.transform.position.x : wall.transform.position.y;
     }
 
     GameObject CreateSummoningCircle(Vector3 position)

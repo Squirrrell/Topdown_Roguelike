@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using System.Collections.Generic;
 
 public class PlayerMovement : MonoBehaviour
 {
@@ -21,6 +22,9 @@ public class PlayerMovement : MonoBehaviour
     public string bulletSortingLayerName = "Default";
     public int bulletSortingOrder = 14;
 
+    [Header("Optimization")]
+    public int maxPooledPlayerBullets = 160;
+
     private Rigidbody2D rb;
     private SpriteRenderer sr;
     private PlayerHealth playerHealth;
@@ -32,6 +36,7 @@ public class PlayerMovement : MonoBehaviour
     private Vector2 dashDirection = Vector2.right;
     private float dashEndTime = 0f;
     private float nextDashTime = 0f;
+    private readonly Queue<PlayerBullet> bulletPool = new Queue<PlayerBullet>(64);
 
     void Start()
     {
@@ -158,8 +163,29 @@ public class PlayerMovement : MonoBehaviour
 
     void SpawnBullet(Vector2 origin, Vector2 direction)
     {
-        GameObject bulletObject = new GameObject("Player Bullet", typeof(SpriteRenderer), typeof(CircleCollider2D), typeof(Rigidbody2D), typeof(PlayerBullet));
+        PlayerBullet bullet = GetPlayerBulletFromPool();
+        GameObject bulletObject = bullet.gameObject;
+        bulletObject.hideFlags = HideFlags.None;
+        bulletObject.SetActive(true);
         bulletObject.transform.position = origin;
+        bullet.Initialize(direction, bulletSpeed, bulletDamage, bulletLifetime, gameObject, ReturnPlayerBulletToPool);
+    }
+
+    PlayerBullet GetPlayerBulletFromPool()
+    {
+        while (bulletPool.Count > 0)
+        {
+            PlayerBullet pooled = bulletPool.Dequeue();
+            if (pooled != null)
+                return pooled;
+        }
+
+        return CreatePlayerBullet();
+    }
+
+    PlayerBullet CreatePlayerBullet()
+    {
+        GameObject bulletObject = new GameObject("Player Bullet", typeof(SpriteRenderer), typeof(CircleCollider2D), typeof(Rigidbody2D), typeof(PlayerBullet));
 
         SpriteRenderer bulletRenderer = bulletObject.GetComponent<SpriteRenderer>();
         bulletRenderer.sprite = GetBulletSprite();
@@ -177,8 +203,24 @@ public class PlayerMovement : MonoBehaviour
         bulletRb.bodyType = RigidbodyType2D.Kinematic;
         bulletRb.gravityScale = 0f;
 
-        PlayerBullet bullet = bulletObject.GetComponent<PlayerBullet>();
-        bullet.Initialize(direction, bulletSpeed, bulletDamage, bulletLifetime, gameObject);
+        return bulletObject.GetComponent<PlayerBullet>();
+    }
+
+    void ReturnPlayerBulletToPool(PlayerBullet bullet)
+    {
+        if (bullet == null)
+            return;
+
+        int maxPool = Mathf.Max(0, maxPooledPlayerBullets);
+        if (bulletPool.Count >= maxPool)
+        {
+            Destroy(bullet.gameObject);
+            return;
+        }
+
+        bullet.gameObject.hideFlags = HideFlags.HideInHierarchy;
+        bullet.gameObject.SetActive(false);
+        bulletPool.Enqueue(bullet);
     }
 
     Sprite GetBulletSprite()
